@@ -1,2 +1,0 @@
-/usr/bin/ar qc libfast_obj.a CMakeFiles/fast_obj.dir/extern/fast_obj/fast_obj.c.o
-/usr/bin/ranlib libfast_obj.a

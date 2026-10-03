@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/wszystkonietak/Documents/projects/meshlet-compressor/build/cmake_install.cmake",
-		"/Users/wszystkonietak/Documents/projects/meshlet-compressor/build/extern/meshoptimizer/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
