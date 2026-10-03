@@ -1,0 +1,176 @@
+{
+	"configurations" : 
+	[
+		{
+			"abstractTargets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "GLEW::GLEW::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-GLEW__GLEW-Debug-6f68b8c260134a606a54.json",
+					"name" : "GLEW::GLEW",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "GLEW::glew::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-GLEW__glew-Debug-b1f27f0c11f5a3e379de.json",
+					"name" : "GLEW::glew",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "OpenGL::GL::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-OpenGL__GL-Debug-dd98609f045d48944b39.json",
+					"name" : "OpenGL::GL",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "OpenGL::GLU::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-OpenGL__GLU-Debug-cd0d5e5174202d454cc5.json",
+					"name" : "OpenGL::GLU",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "Threads::Threads::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-Threads__Threads-Debug-1feb9437f5f71050c24f.json",
+					"name" : "Threads::Threads",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "glfw::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-glfw-Debug-257558c3837c7d2b30c2.json",
+					"name" : "glfw",
+					"projectIndex" : 0
+				}
+			],
+			"directories" : 
+			[
+				{
+					"abstractTargetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5
+					],
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-Debug-fd6451d79dc282e2f566.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				},
+				{
+					"build" : "extern/meshoptimizer",
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-extern.meshoptimizer-Debug-995c74d2a9747411bd4c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.5"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "extern/meshoptimizer",
+					"targetIndexes" : 
+					[
+						2
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"abstractTargetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5
+					],
+					"childIndexes" : 
+					[
+						1
+					],
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "meshlet_compressor",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						1
+					],
+					"name" : "meshoptimizer",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						2
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "fast_obj::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-fast_obj-Debug-2817fbd0d7070bbf413b.json",
+					"name" : "fast_obj",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "meshlet_compressor::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-meshlet_compressor-Debug-02b84c1c489c9f220654.json",
+					"name" : "meshlet_compressor",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "meshoptimizer::@657784905cb2ec19517a",
+					"jsonFile" : "target-meshoptimizer-Debug-44cc15952c826f7571b4.json",
+					"name" : "meshoptimizer",
+					"projectIndex" : 1
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/Users/wszystkonietak/Documents/projects/meshlet-compressor/build",
+		"source" : "/Users/wszystkonietak/Documents/projects/meshlet-compressor"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 10
+	}
+}

@@ -1,0 +1,6 @@
+[submodule "extern/meshoptimizer"]
+	path = extern/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git
+[submodule "extern/fast_obj"]
+	path = extern/fast_obj
+	url = https://github.com/thisistherk/fast_obj.git

@@ -1,0 +1,107 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"extern/meshoptimizer/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 186,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 197,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 198,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 222,
+				"parent" : 0
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 10
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "meshoptimizer",
+			"destination" : "lib",
+			"paths" : 
+			[
+				"extern/meshoptimizer/libmeshoptimizer.a"
+			],
+			"targetId" : "meshoptimizer::@657784905cb2ec19517a",
+			"targetIndex" : 2,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "meshoptimizer",
+			"destination" : "include",
+			"paths" : 
+			[
+				"extern/meshoptimizer/src/meshoptimizer.h"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 3,
+			"component" : "meshoptimizer",
+			"destination" : "lib/cmake/meshoptimizer",
+			"exportName" : "meshoptimizerTargets",
+			"exportTargets" : 
+			[
+				{
+					"id" : "meshoptimizer::@657784905cb2ec19517a",
+					"index" : 2
+				}
+			],
+			"paths" : 
+			[
+				"extern/meshoptimizer/CMakeFiles/Export/ceb4a2f0e054867e59945df3bd2dce32/meshoptimizerTargets.cmake"
+			],
+			"type" : "export"
+		},
+		{
+			"backtrace" : 4,
+			"component" : "meshoptimizer",
+			"destination" : "lib/cmake/meshoptimizer",
+			"paths" : 
+			[
+				"build/extern/meshoptimizer/meshoptimizerConfig.cmake",
+				"build/extern/meshoptimizer/meshoptimizerConfigVersion.cmake"
+			],
+			"type" : "file"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "extern/meshoptimizer",
+		"source" : "extern/meshoptimizer"
+	}
+}
