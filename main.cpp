@@ -91,9 +91,13 @@ int main(int argc, char** argv) {
   std::vector<float> dual_graph_positions;
   std::vector<unsigned int> strip_indices;
   std::vector<int> strip_states;
+  
+  std::vector<unsigned int> meshlet_ordered_indices;
+  std::vector<int> mesh_triangle_states;
 
   int global_face_offset = 0;
   int global_path_idx = 0;
+  int current_meshlet_id = 0;
 
   for (const auto& meshlet : meshlets) {
     std::vector<int> local_indices(meshlet.triangle_count * 3);
@@ -123,6 +127,16 @@ int main(int argc, char** argv) {
       glm::vec3 centroid =
           (vertices[v0_global] + vertices[v1_global] + vertices[v2_global]) /
           3.0f;
+          
+      // Push the unrolled indices for unique per-triangle coloring
+      meshlet_ordered_indices.push_back(v0_global);
+      meshlet_ordered_indices.push_back(v1_global);
+      meshlet_ordered_indices.push_back(v2_global);
+      
+      // Push 3 identical states per triangle (+2 offset for the shader uniqueness check)
+      mesh_triangle_states.push_back(current_meshlet_id + 2);
+      mesh_triangle_states.push_back(current_meshlet_id + 2);
+      mesh_triangle_states.push_back(current_meshlet_id + 2);
 
       dual_graph_positions.push_back(centroid.x);
       dual_graph_positions.push_back(centroid.y);
@@ -136,12 +150,15 @@ int main(int argc, char** argv) {
         strip_indices.push_back(global_face_offset + path[i]);
         strip_indices.push_back(global_face_offset + path[i + 1]);
 
-        strip_states.push_back(global_path_idx);
+        // Push 2 identical states per line segment (+2 offset for shader uniqueness check)
+        strip_states.push_back(global_path_idx + 2);
+        strip_states.push_back(global_path_idx + 2);
       }
       global_path_idx++;
     }
 
     global_face_offset += meshlet.triangle_count;
+    current_meshlet_id++;
   }
 
   std::vector<float> mesh_positions(vertices.size() * 3);
@@ -152,7 +169,9 @@ int main(int argc, char** argv) {
   }
 
   MeshViewer mv;
-  mv.upload_mesh(mesh_positions.data(), indices.data(), indices.size());
+  // Upload with the newly populated index/state vectors
+  mv.upload_mesh(mesh_positions.data(), meshlet_ordered_indices.data(), 
+                 meshlet_ordered_indices.size(), mesh_triangle_states.data());
   mv.upload_strips(dual_graph_positions.data(), strip_indices.data(),
                    strip_indices.size(), strip_states.data());
   mv.set_window_title(argc < 2 ? "ETA" : argv[1]);

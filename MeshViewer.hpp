@@ -20,7 +20,6 @@ public:
     {
         while (!glfwWindowShouldClose(window))
         {
-            PrimitiveOnlyMesh::draw_call_id = 0;
             glfwPollEvents();
             float currentFrame = static_cast<float>(glfwGetTime());
             deltaTime = currentFrame - lastFrame;
@@ -32,16 +31,45 @@ public:
             glm::mat4 projection = glm::perspective(glm::radians(fov), (float)w / (float)h, 0.1f, 1000.0f);
             glm::mat4 view = glm::lookAt(cameraPos, lookAtPos, cameraUp);
 
-            glClearColor(0.125f, 0.094f, 0.235f, 1.0f);
+            glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             glUseProgram(shader);
             glUniformMatrix4fv(PrimitiveOnlyMesh::projection_location, 1, GL_FALSE, &projection[0][0]);
             glUniformMatrix4fv(PrimitiveOnlyMesh::view_location, 1, GL_FALSE, &view[0][0]);
 
+            // --- TIER 1: Depth Pre-Pass (Furthest back) ---
+            PrimitiveOnlyMesh::draw_call_id = 99; 
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE); 
+            
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            // Push the solid mesh very far back to hide the back side of the model
+            glPolygonOffset(20.0f, 20.0f); 
+            mesh.draw();
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); 
+
+            // --- Visible Wireframes ---
+            PrimitiveOnlyMesh::draw_call_id = 0; 
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            
+            glEnable(GL_POLYGON_OFFSET_LINE);
+            
+            // --- TIER 2: Strips (Closest to camera) ---
+            // Pull the strips aggressively forward so they don't clip under the triangles
+            glPolygonOffset(-30.0f, -30.0f); 
             graph.draw();
             graph2.draw();
-            mesh.draw();
+            
+            // --- TIER 3: Mesh Triangles (Middle depth) ---
+            // Push the triangle outlines back, behind the strips but in front of the solid mesh
+            glPolygonOffset(10.0f, 10.0f); 
+            mesh.draw(); // uId = 2
+            
+            glDisable(GL_POLYGON_OFFSET_LINE);
+            
             glfwSwapBuffers(window);
         }
 
@@ -49,10 +77,10 @@ public:
         glfwTerminate();
     }
     
-    void upload_mesh(float *positions, unsigned int *indices, int index_count)
+    void upload_mesh(float *positions, unsigned int *indices, int index_count, int *states = nullptr)
     {
         mesh.set_mode(GL_TRIANGLES);
-        mesh.create_primitive_mesh(positions, indices, index_count);
+        mesh.create_primitive_mesh(positions, indices, index_count, states);
     }
 
     void upload_strips(float *positions, unsigned int *indices, int index_count, int *states,
@@ -65,7 +93,6 @@ public:
             graph2.set_mode(GL_LINES);
             graph2.create_primitive_mesh(positions2, indices2, index_count2, states2);
         }
-        
     }
 
     void set_window_title(const char* title)
@@ -73,7 +100,6 @@ public:
         glfwSetWindowTitle(window, title);
     }
 private:
-    
     void setup()
     {
         if (!glfwInit())
@@ -85,8 +111,11 @@ private:
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        
+        // Request 8x Multisample Anti-Aliasing (MSAA)
+        glfwWindowHint(GLFW_SAMPLES, 8); 
 
-        window = glfwCreateWindow(600, 600, "", nullptr, nullptr);
+        window = glfwCreateWindow(800, 800, "", nullptr, nullptr);
         if (!window)
         {
             std::cerr << "ERROR: GLFW Window Creation Failed!" << std::endl;
@@ -96,50 +125,36 @@ private:
         glfwMakeContextCurrent(window);
         glfwSetWindowAttrib(window, GLFW_FLOATING, GLFW_TRUE);
         glfwSwapInterval(1);
-        // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         if (glewInit() != GLEW_OK)
         {
             std::cerr << "ERROR: GLEW Initialization Failed!" << std::endl;
             abort();
         }
+        
         glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
         glEnable(GL_DEPTH_TEST);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        
+        // Enable Hardware Anti-Aliasing
+        glEnable(GL_MULTISAMPLE); 
+        
+        // Optional smooth hints for lines
+        glEnable(GL_LINE_SMOOTH);
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+        
+        // Initial setup for wide lines
+        glLineWidth(3.0f); 
 
         shader = createShaderProgram(vertex_shader, fragment_shader);
-
-        // lookAtPos = find_mesh_center(positions, indices, index_count);
         
         PrimitiveOnlyMesh::graph_color_location = glGetUniformLocation(shader, "uId");
         PrimitiveOnlyMesh::projection_location = glGetUniformLocation(shader, "uProjection");
         PrimitiveOnlyMesh::view_location = glGetUniformLocation(shader, "uView");
     }
 
-    glm::vec3 find_mesh_center(float *positions, int *indices, int index_count)
-    {
-        glm::vec3 center(0.0f);
-
-        for (int i = 0; i < index_count; ++i)
-        {
-            int idx = indices[i];
-            glm::vec3 vertex(
-                positions[3 * idx],
-                positions[3 * idx + 1],
-                positions[3 * idx + 2]);
-            center += vertex;
-        }
-
-        if (index_count > 0)
-            center /= static_cast<float>(index_count);
-
-        return center;
-    }
-
     glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
     glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
     glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-
     glm::vec3 lookAtPos = glm::vec3(0, 0, 0);
 
     bool firstMouse = true;
@@ -216,8 +231,7 @@ private:
         {
             char infoLog[512];
             glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-            std::cerr << "ERROR: Shader Compilation Failed\n"
-                      << infoLog << std::endl;
+            std::cerr << "ERROR: Shader Compilation Failed\n" << infoLog << std::endl;
         }
         return shader;
     }
@@ -238,8 +252,7 @@ private:
         {
             char infoLog[512];
             glGetProgramInfoLog(shaderProgram, 512, nullptr, infoLog);
-            std::cerr << "ERROR: Shader Program Linking Failed\n"
-                      << infoLog << std::endl;
+            std::cerr << "ERROR: Shader Program Linking Failed\n" << infoLog << std::endl;
         }
 
         glDeleteShader(vertexShader);
@@ -255,47 +268,35 @@ private:
         out vec3 color;
         flat out int state;
         out vec3 fragPos; 
-        flat out vec3 pointPos; 
         uniform int uId;
     
         uniform mat4 uView;
         uniform mat4 uProjection;
     
-        // Reverted to uint to prevent fatal signed overflow
-        uint hash(uint x) {
-            x++;
-            x += ( x << 10u );
-            x ^= ( x >>  6u );
-            x += ( x <<  3u );
-            x ^= ( x >> 11u );
-            x += ( x << 15u );
-            return x;
+        vec3 Hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        vec3 ColorFromID(int id, bool is_strip) {
+            float hue = fract(float(id) * 0.6180339887);
+            
+            float saturation = is_strip ? 0.95 : 0.45;
+            float brightness = is_strip ? 1.00 : 0.35;
+            
+            return Hsv2rgb(vec3(hue, saturation, brightness));
         }
     
         void main()
         {
             gl_PointSize = 10.0;
             state = aState;
-            if(state < 2)
-            {
-                fragPos = aPos;
-                pointPos = aPos;
-                uint h = hash(uint(uId));
-                float r = float((h >>  0u) & 0xFFu) / 255.0;
-                float g = float((h >>  8u) & 0xFFu) / 255.0;
-                float b = float((h >> 16u) & 0xFFu) / 255.0;
-                color = vec3(r, g, b);
-            }
-            else 
-            {            
-                fragPos = aPos;
-                pointPos = aPos;
-                uint h = hash(uint(10 * uId + state));
-                float r = float((h >>  0u) & 0xFFu) / 255.0;
-                float g = float((h >>  8u) & 0xFFu) / 255.0;
-                float b = float((h >> 16u) & 0xFFu) / 255.0;
-                color = vec3(r, g, b);
-            }
+            fragPos = aPos;
+            
+            bool is_strip = (uId < 2);
+            color = ColorFromID(state, is_strip);
+            
             gl_Position = uProjection * uView * vec4(aPos, 1.0);
         }
     )";
@@ -305,18 +306,12 @@ private:
     
         in vec3 color;
         in vec3 fragPos;
-        flat in vec3 pointPos; 
         flat in int state;
     
         out vec4 FragColor;
     
         void main()
         {
-            if (state == 1)
-            {
-                if (int(distance(pointPos.xy, fragPos.xy) * 25.0) % 2 == 1) 
-                    discard; 
-            }
             FragColor = vec4(color, 1.0); 
         }
     )";

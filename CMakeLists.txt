@@ -18,7 +18,7 @@ add_subdirectory(extern/meshoptimizer)
 # Main executable
 add_executable(meshlet_compressor
     main.cpp
-    mesh.cpp
+    # mesh.cpp
 )
 
 # Link targets and include local headers
