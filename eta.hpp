@@ -1,86 +1,107 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <concepts>
 #include <functional>
 #include <ranges>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include "Timer.hpp"
 
 template <typename Graph, typename IndexType>
 concept PathCoverGraph =
     std::integral<IndexType> && requires(Graph graph, IndexType node) {
-      { graph.node_count() } -> std::integral;
-      { graph.get_neighbors(node) } -> std::ranges::input_range;
+      { graph.NodeCount() } -> std::integral;
+      { graph.GetNeighbors(node) } -> std::ranges::input_range;
     };
 
 template <typename Graph, typename IndexType>
   requires PathCoverGraph<Graph, IndexType>
 class PathCover {
  public:
-  static constexpr IndexType NullIndex = static_cast<IndexType>(-1);
-  PathCover(const Graph& g)
-      : graph(g),
-        _node_count(g.node_count()),
-        _k_star(_node_count, 0),
-        _star_nodes(_node_count, 0),
-        _nodes(_node_count),
-        _paths(_node_count),
-        _node_ids(_node_count),
-        _terminals(_node_count, true) {
-    for (IndexType i = 0; i < _node_count; ++i) {
-      _node_ids[i] = {i, 0};
+  static constexpr IndexType kNullIndex = static_cast<IndexType>(-1);
 
-      _paths[i].head = i;
-      _paths[i].tail = i;
+  explicit PathCover(const Graph& g)
+      : graph_(g),
+        node_count_(g.NodeCount()),
+        k_star_(node_count_, 0),
+        star_nodes_(node_count_, 0),
+        nodes_(node_count_),
+        paths_(node_count_),
+        node_ids_(node_count_),
+        fake_edge_target_(node_count_, kNullIndex),
+        terminals_(node_count_, true),
+        nodes_order_(node_count_),
+        star_nodes_tmp_(node_count_) {
+    for (IndexType i = 0; i < node_count_; ++i) {
+      node_ids_[i] = {i, 0};
+      paths_[i].head = i;
+      paths_[i].tail = i;
     }
 
-    _star_nodes.reserve(_node_count);
-    _insert_order.reserve(_node_count);
-    _to_connect.reserve(_node_count);
-    _to_split.reserve(_node_count);
+    local_graph_.resize(node_count_);
+    for (IndexType i = 0; i < node_count_; ++i) {
+      for (IndexType neighbor : g.GetNeighbors(i)) {
+        local_graph_[i].push_back(neighbor);
+      }
+    }
+    star_nodes_.reserve(node_count_);
+    insert_order_.reserve(node_count_);
+    to_connect_.reserve(node_count_);
+    to_split_.reserve(node_count_);
   }
 
   std::vector<std::vector<IndexType>> GeneratePaths() {
+    int remaining_paths = node_count_;
     int prev_counter = -1;
-    bool first_iter = true;
+    int max_k = 100;
 
-    int remaining_paths = _node_count;
+    Timer t;
+    t.Start();
 
-    for (int k = 0; k <= 50; ++k) {
+    for (int k = 0; k <= max_k; ++k) {
       int counter = 0;
 
-      for (IndexType i = 0; i < _node_count; ++i) {
+      for (IndexType i = 0; i < node_count_; ++i) {
         if (IsTerminal(i)) {
           if (!LaunchTunneling(i, k)) {
             counter++;
           } else {
             remaining_paths--;
-            std::cout<<remaining_paths<<'\n';
           }
         }
       }
 
-      // if (counter != prev_counter) {
-      //   first_iter = false;
-      //   k--;
-      // } else {
-      //   first_iter = true;
-      // }
-      // prev_counter = counter;
+      std::string msg = "k: " + std::to_string(k) +
+                        " | Remaining: " + std::to_string(remaining_paths);
+      t.Step(msg);
+
+      if (counter == prev_counter && !optimal_mode_) {
+        optimal_mode_ = true;
+        checked_terminals_.clear();
+        k = -1;
+        max_k = 10;
+      }
+
+      prev_counter = counter;
 
       if (remaining_paths <= 1) break;
     }
 
     std::vector<std::vector<IndexType>> paths;
-    for (IndexType i = 0; i < _node_count; ++i) {
-      if (_paths[i].head != NullIndex) {
+    for (IndexType i = 0; i < node_count_; ++i) {
+      if (paths_[i].head != kNullIndex) {
         std::vector<IndexType> current_path;
-        IndexType current = _paths[i].head;
+        IndexType current = paths_[i].head;
 
-        while (current != NullIndex) {
+        while (current != kNullIndex) {
           current_path.push_back(current);
-          current = _nodes[current].next;
+          current = nodes_[current].next;
         }
         paths.push_back(std::move(current_path));
       }
@@ -89,153 +110,146 @@ class PathCover {
     return paths;
   }
 
-  const Graph& graph;
-
  private:
-  IndexType _node_count;
-  std::vector<IndexType> _k_star;
-  std::vector<IndexType> _star_nodes;
-  int _k_star_version = 1;
-  int _k_star_subgroup_version = 1;
-  int _max_count = 10000;
-  int _max_depth = 200;
-
-  struct node {
-    IndexType prev = NullIndex, next = NullIndex;
-  };
-  struct path {
-    IndexType head = NullIndex, tail = NullIndex;
-  };
-  struct fix_data {
-    IndexType terminal, insert, split;
+  struct Node {
+    IndexType prev = kNullIndex;
+    IndexType next = kNullIndex;
   };
 
-  std::vector<node> _nodes;
-  std::vector<path> _paths;
-  std::vector<std::pair<IndexType, IndexType>> _node_ids;
-  std::vector<fix_data> _insert_order;
-  std::vector<std::pair<int, int>> _to_connect;
-  std::vector<std::pair<int, int>> _to_split;
-  std::vector<bool> _terminals;
+  struct Path {
+    IndexType head = kNullIndex;
+    IndexType tail = kNullIndex;
+  };
+
+  struct FixData {
+    IndexType terminal;
+    IndexType insert;
+    IndexType split;
+  };
 
   void UpdateNodeIds(IndexType strip_id) {
-    for (IndexType current = _paths[strip_id].head, it = 0;
-         current != NullIndex; current = _nodes[current].next, ++it) {
-      _node_ids[current] = {strip_id, it};
+    for (IndexType current = paths_[strip_id].head, it = 0;
+         current != kNullIndex; current = nodes_[current].next, ++it) {
+      node_ids_[current] = {strip_id, it};
     }
   }
 
-  void ApplyChanges() {              
-    for (const auto& [n1, n2] : _to_split) {
-      Split(n1, n2);
+  void ApplyChanges() {
+    for (const auto& [n1, n2] : to_split_) {
+      fake_edge_target_[n1] = kNullIndex;
+      fake_edge_target_[n2] = kNullIndex;
+      if (AdjacencyTest(n1, n2)) {
+        Split(n1, n2);
+      }
     }
-    _to_split.clear();
+    to_split_.clear();
 
-    while (!_to_connect.empty()) {
-      auto [n1, n2] = _to_connect.back();
-      _to_connect.pop_back();
+    while (!to_connect_.empty()) {
+      auto [n1, n2] = to_connect_.back();
+      to_connect_.pop_back();
 
-      IndexType s1 = _node_ids[n1].first;
-      IndexType s2 = _node_ids[n2].first;
-      
-      bool front1 = (s1 == n1);
-      bool front2 = (s2 == n2);
+      IndexType s1 = node_ids_[n1].first;
+      IndexType s2 = node_ids_[n2].first;
 
-      ConnectStrips(s1, front1, s2, front2);
+      if (s1 != s2) {
+        bool front1 = (s1 == n1);
+        bool front2 = (s2 == n2);
+        ConnectStrips(s1, front1, s2, front2);
+      }
     }
   }
 
-  bool IsTerminal(IndexType id) {
-    return _terminals[id];
+  bool IsTerminal(IndexType id) const { return terminals_[id]; }
+
+  bool AdjacencyTest(IndexType n1, IndexType n2) const {
+    return (node_ids_[n1].first == node_ids_[n2].first) &&
+           (std::abs(static_cast<long long>(node_ids_[n1].second) -
+                     static_cast<long long>(node_ids_[n2].second)) == 1);
   }
 
-  bool IsRedEdge(IndexType n1, IndexType n2) {
-    return n1 != _nodes[n2].prev && n1 != _nodes[n2].next;
-  }
+  void JoinStrips(IndexType new_strip, IndexType s1, IndexType s2) {
+    IndexType tail1 = paths_[s1].tail;
+    IndexType head2 = paths_[s2].head;
 
-  void JoinStrips(IndexType newStrip, IndexType s1, IndexType s2) {
-    IndexType tail1 = _paths[s1].tail;
-    IndexType head2 = _paths[s2].head;
+    nodes_[tail1].next = head2;
+    nodes_[head2].prev = tail1;
 
-    _nodes[tail1].next = head2;
-    _nodes[head2].prev = tail1;
+    paths_[new_strip].head = paths_[s1].head;
+    paths_[new_strip].tail = paths_[s2].tail;
 
-    _paths[newStrip].head = _paths[s1].head;
-    _paths[newStrip].tail = _paths[s2].tail;
-
-    if (newStrip != s1) _paths[s1] = {NullIndex, NullIndex};
-    if (newStrip != s2) _paths[s2] = {NullIndex, NullIndex};
+    if (new_strip != s1) paths_[s1] = {kNullIndex, kNullIndex};
+    if (new_strip != s2) paths_[s2] = {kNullIndex, kNullIndex};
   }
 
   void ReverseStrip(IndexType strip_id) {
-    _paths[strip_id].tail = _paths[strip_id].head;
-    IndexType last = _paths[strip_id].head;
+    paths_[strip_id].tail = paths_[strip_id].head;
+    IndexType last = paths_[strip_id].head;
 
-    for (IndexType current = _paths[strip_id].head; current != NullIndex;
-         current = _nodes[current].prev) {
-      std::swap(_nodes[current].prev, _nodes[current].next);
+    for (IndexType current = paths_[strip_id].head; current != kNullIndex;
+         current = nodes_[current].prev) {
+      std::swap(nodes_[current].prev, nodes_[current].next);
       last = current;
     }
 
-    _paths[strip_id].head = last;
+    paths_[strip_id].head = last;
   }
 
   void ConnectStrips(IndexType s1, bool front, IndexType s2, bool front2) {
     int s2_length =
-        _node_ids[_paths[s2].tail].second - _node_ids[_paths[s2].head].second;
+        node_ids_[paths_[s2].tail].second - node_ids_[paths_[s2].head].second;
     int s1_length =
-        _node_ids[_paths[s1].tail].second - _node_ids[_paths[s1].head].second;
+        node_ids_[paths_[s1].tail].second - node_ids_[paths_[s1].head].second;
 
     if (!front && front2) {
-      _nodes[_paths[s1].tail].next = _paths[s2].head;
-      _nodes[_paths[s2].head].prev = _paths[s1].tail;
-      _paths[s1].tail = _paths[s2].tail;
-      _paths[s2] = {NullIndex, NullIndex};
+      nodes_[paths_[s1].tail].next = paths_[s2].head;
+      nodes_[paths_[s2].head].prev = paths_[s1].tail;
+      paths_[s1].tail = paths_[s2].tail;
+      paths_[s2] = {kNullIndex, kNullIndex};
       UpdateNodeIds(s1);
     } else if (front && !front2) {
-      _nodes[_paths[s2].tail].next = _paths[s1].head;
-      _nodes[_paths[s1].head].prev = _paths[s2].tail;
-      _paths[s2].tail = _paths[s1].tail;
-      _paths[s1] = {NullIndex, NullIndex};
+      nodes_[paths_[s2].tail].next = paths_[s1].head;
+      nodes_[paths_[s1].head].prev = paths_[s2].tail;
+      paths_[s2].tail = paths_[s1].tail;
+      paths_[s1] = {kNullIndex, kNullIndex};
       UpdateNodeIds(s2);
     } else if (!front && !front2) {
       if (s2_length > s1_length) {
         ReverseStrip(s1);
-        _nodes[_paths[s2].tail].next = _paths[s1].head;
-        _nodes[_paths[s1].head].prev = _paths[s2].tail;
-        _paths[s2].tail = _paths[s1].tail;
-        _paths[s1] = {NullIndex, NullIndex};
+        nodes_[paths_[s2].tail].next = paths_[s1].head;
+        nodes_[paths_[s1].head].prev = paths_[s2].tail;
+        paths_[s2].tail = paths_[s1].tail;
+        paths_[s1] = {kNullIndex, kNullIndex};
         UpdateNodeIds(s2);
       } else {
         ReverseStrip(s2);
-        _nodes[_paths[s1].tail].next = _paths[s2].head;
-        _nodes[_paths[s2].head].prev = _paths[s1].tail;
-        _paths[s1].tail = _paths[s2].tail;
-        _paths[s2] = {NullIndex, NullIndex};
+        nodes_[paths_[s1].tail].next = paths_[s2].head;
+        nodes_[paths_[s2].head].prev = paths_[s1].tail;
+        paths_[s1].tail = paths_[s2].tail;
+        paths_[s2] = {kNullIndex, kNullIndex};
         UpdateNodeIds(s1);
       }
     } else {
       if (s2_length > s1_length) {
-        IndexType new_id = _paths[s1].tail;
+        IndexType new_id = paths_[s1].tail;
         ReverseStrip(s1);
-        _nodes[_paths[s1].tail].next = _paths[s2].head;
-        _nodes[_paths[s2].head].prev = _paths[s1].tail;
-        _paths[s1].tail = _paths[s2].tail;
-        _paths[new_id].head = _paths[s1].head;
-        _paths[new_id].tail = _paths[s1].tail;
-        if (new_id != s1) _paths[s1] = {NullIndex, NullIndex};
-        _paths[s2] = {NullIndex, NullIndex};
+        nodes_[paths_[s1].tail].next = paths_[s2].head;
+        nodes_[paths_[s2].head].prev = paths_[s1].tail;
+        paths_[s1].tail = paths_[s2].tail;
+        paths_[new_id].head = paths_[s1].head;
+        paths_[new_id].tail = paths_[s1].tail;
+        if (new_id != s1) paths_[s1] = {kNullIndex, kNullIndex};
+        paths_[s2] = {kNullIndex, kNullIndex};
         UpdateNodeIds(new_id);
       } else {
-        IndexType new_id = _paths[s2].tail;
+        IndexType new_id = paths_[s2].tail;
         ReverseStrip(s2);
-        _nodes[_paths[s2].tail].next = _paths[s1].head;
-        _nodes[_paths[s1].head].prev = _paths[s2].tail;
-        _paths[s2].tail = _paths[s1].tail;
-        _paths[new_id].head = _paths[s2].head;
-        _paths[new_id].tail = _paths[s2].tail;
-        if (new_id != s2) _paths[s2] = {NullIndex, NullIndex};
-        _paths[s1] = {NullIndex, NullIndex};
+        nodes_[paths_[s2].tail].next = paths_[s1].head;
+        nodes_[paths_[s1].head].prev = paths_[s2].tail;
+        paths_[s2].tail = paths_[s1].tail;
+        paths_[new_id].head = paths_[s2].head;
+        paths_[new_id].tail = paths_[s2].tail;
+        if (new_id != s2) paths_[s2] = {kNullIndex, kNullIndex};
+        paths_[s1] = {kNullIndex, kNullIndex};
         UpdateNodeIds(new_id);
       }
     }
@@ -243,69 +257,68 @@ class PathCover {
 
   void MakeMess(IndexType terminal, IndexType insert_node, IndexType split_node,
                 bool fix_mess = false) {
-    IndexType new_terminal, new_insert, new_split;
-
     IndexType separated_strip_end1 = split_node;
     IndexType joined_strip_end1;
-    IndexType terminal_strip = _node_ids[terminal].first;
+    IndexType terminal_strip = node_ids_[terminal].first;
     bool front = (terminal == terminal_strip);
 
     if (front) {
-      joined_strip_end1 = _paths[terminal_strip].tail;
+      joined_strip_end1 = paths_[terminal_strip].tail;
     } else {
-      joined_strip_end1 = _paths[terminal_strip].head;
+      joined_strip_end1 = paths_[terminal_strip].head;
     }
 
-    IndexType split_id = _node_ids[split_node].second;
-    IndexType insert_id = _node_ids[insert_node].second;
-    IndexType separated_strip_end2, joined_strip_end2;
-    IndexType split_strip = _node_ids[split_node].first;
+    IndexType split_id = node_ids_[split_node].second;
+    IndexType insert_id = node_ids_[insert_node].second;
+    IndexType separated_strip_end2;
+    IndexType joined_strip_end2;
+    IndexType split_strip = node_ids_[split_node].first;
     bool front2 = (split_id > insert_id);
 
     if (terminal_strip == split_strip) {
       if (front2) {
-        _paths[split_node].head = split_node;
-        _paths[split_node].tail = _paths[terminal_strip].tail;
-        _paths[terminal_strip].tail = insert_node;
-        _nodes[split_node].prev = NullIndex;
-        _nodes[insert_node].next = NullIndex;
+        paths_[split_node].head = split_node;
+        paths_[split_node].tail = paths_[terminal_strip].tail;
+        paths_[terminal_strip].tail = insert_node;
+        nodes_[split_node].prev = kNullIndex;
+        nodes_[insert_node].next = kNullIndex;
         ConnectStrips(terminal_strip, false, split_node, false);
       } else {
-        _paths[insert_node].head = insert_node;
-        _paths[insert_node].tail = _paths[terminal_strip].tail;
-        _paths[terminal_strip].tail = split_node;
-        _nodes[split_node].next = NullIndex;
-        _nodes[insert_node].prev = NullIndex;
+        paths_[insert_node].head = insert_node;
+        paths_[insert_node].tail = paths_[terminal_strip].tail;
+        paths_[terminal_strip].tail = split_node;
+        nodes_[split_node].next = kNullIndex;
+        nodes_[insert_node].prev = kNullIndex;
         ConnectStrips(terminal_strip, true, insert_node, true);
       }
       if (!fix_mess) {
-        _insert_order.push_back({split_node, insert_node, terminal});
+        insert_order_.push_back({split_node, insert_node, terminal});
       }
       return;
     }
 
     if (front2) {
-      separated_strip_end2 = _paths[split_strip].tail;
-      joined_strip_end2 = _paths[split_strip].head;
+      separated_strip_end2 = paths_[split_strip].tail;
+      joined_strip_end2 = paths_[split_strip].head;
     } else {
-      separated_strip_end2 = _paths[split_strip].head;
-      joined_strip_end2 = _paths[split_strip].tail;
+      separated_strip_end2 = paths_[split_strip].head;
+      joined_strip_end2 = paths_[split_strip].tail;
     }
 
     if (front2) {
-      _paths[separated_strip_end1].head = separated_strip_end1;
-      _paths[separated_strip_end1].tail = separated_strip_end2;
-      _nodes[separated_strip_end1].prev = NullIndex;
-      _nodes[separated_strip_end2].next = NullIndex;
+      paths_[separated_strip_end1].head = separated_strip_end1;
+      paths_[separated_strip_end1].tail = separated_strip_end2;
+      nodes_[separated_strip_end1].prev = kNullIndex;
+      nodes_[separated_strip_end2].next = kNullIndex;
       if (separated_strip_end1 != separated_strip_end2) {
-        _paths[separated_strip_end2] = {NullIndex, NullIndex};
+        paths_[separated_strip_end2] = {kNullIndex, kNullIndex};
       }
       UpdateNodeIds(separated_strip_end1);
     } else {
-      _paths[separated_strip_end2].head = separated_strip_end2;
-      _paths[separated_strip_end2].tail = separated_strip_end1;
-      _nodes[separated_strip_end2].prev = NullIndex;
-      _nodes[separated_strip_end1].next = NullIndex;
+      paths_[separated_strip_end2].head = separated_strip_end2;
+      paths_[separated_strip_end2].tail = separated_strip_end1;
+      nodes_[separated_strip_end2].prev = kNullIndex;
+      nodes_[separated_strip_end1].next = kNullIndex;
       UpdateNodeIds(separated_strip_end2);
     }
 
@@ -313,10 +326,10 @@ class PathCover {
     IndexType tmp_strip_end2 = joined_strip_end2;
     if (front2) std::swap(tmp_strip_end, tmp_strip_end2);
 
-    _paths[tmp_strip_end].head = tmp_strip_end;
-    _paths[tmp_strip_end].tail = tmp_strip_end2;
-    _nodes[tmp_strip_end].prev = NullIndex;
-    _nodes[tmp_strip_end2].next = NullIndex;
+    paths_[tmp_strip_end].head = tmp_strip_end;
+    paths_[tmp_strip_end].tail = tmp_strip_end2;
+    nodes_[tmp_strip_end].prev = kNullIndex;
+    nodes_[tmp_strip_end2].next = kNullIndex;
 
     bool terminal_strip_front_connect = !front;
     bool split_strip_front_connect = front2;
@@ -324,30 +337,32 @@ class PathCover {
                   !split_strip_front_connect);
 
     if (!fix_mess) {
-      _insert_order.push_back({split_node, insert_node, terminal});
+      insert_order_.push_back({split_node, insert_node, terminal});
     }
   }
 
-  void Split(IndexType node1, IndexType node2) {    
-    IndexType strip = _node_ids[node1].first;
-    IndexType id1 = _node_ids[node2].second;
-    IndexType id2 = _node_ids[node1].second;
+  void Split(IndexType node1, IndexType node2) {
+    if (!AdjacencyTest(node1, node2)) return;
+
+    IndexType strip = node_ids_[node1].first;
+    IndexType id1 = node_ids_[node2].second;
+    IndexType id2 = node_ids_[node1].second;
 
     if (id1 > id2) std::swap(node1, node2);
 
-    _paths[node1].tail = _paths[strip].tail;
-    _paths[strip].tail = node2;
-    _nodes[node2].next = NullIndex;
+    paths_[node1].tail = paths_[strip].tail;
+    paths_[strip].tail = node2;
+    nodes_[node2].next = kNullIndex;
 
-    _paths[node1].head = node1;
-    _nodes[node1].prev = NullIndex;
+    paths_[node1].head = node1;
+    nodes_[node1].prev = kNullIndex;
 
     UpdateNodeIds(node1);
   }
 
   void FixMess() {
-    auto d = _insert_order.back();
-    _insert_order.pop_back();
+    auto d = insert_order_.back();
+    insert_order_.pop_back();
     MakeMess(d.terminal, d.insert, d.split, true);
   }
 
@@ -357,17 +372,15 @@ class PathCover {
     std::vector<IndexType> outside_k_star;
     std::unordered_map<IndexType, std::vector<IndexType>> tmp_edges;
 
-    for (const auto& node : _star_nodes) {
+    for (const auto& node : star_nodes_) {
       if (IsTerminal(node)) {
         local_terminals_count++;
       }
 
-      IndexType black_edges[2] = {_nodes[node].prev, _nodes[node].next};
+      IndexType black_edges[2] = {nodes_[node].prev, nodes_[node].next};
       for (IndexType connection : black_edges) {
-        if (connection != NullIndex &&
-            !KStarContains(connection)) {
-                    
-          tmp_edges[_node_ids[node].first].push_back(node);
+        if (connection != kNullIndex && !KStarContains(connection)) {
+          tmp_edges[node_ids_[node].first].push_back(node);
           inside_k_star.push_back(node);
           outside_k_star.push_back(connection);
         }
@@ -376,54 +389,155 @@ class PathCover {
 
     for (auto& [strip_id, cross_ids] : tmp_edges) {
       std::ranges::sort(cross_ids, std::less<>{},
-                        [&](IndexType id) { return _node_ids[id].second; });
+                        [&](IndexType id) { return node_ids_[id].second; });
       bool starts_outside = !KStarContains(strip_id);
       size_t start_index = starts_outside ? 1 : 0;
 
       for (size_t i = start_index; i + 1 < cross_ids.size(); i += 2) {
-        _to_split.emplace_back(cross_ids[i], cross_ids[i + 1]);
+        to_split_.emplace_back(cross_ids[i], cross_ids[i + 1]);
       }
     }
 
     for (size_t i = 0; i < inside_k_star.size(); i++) {
-      _to_connect.emplace_back(inside_k_star[i], outside_k_star[i]);
+      to_connect_.emplace_back(inside_k_star[i], outside_k_star[i]);
       Split(inside_k_star[i], outside_k_star[i]);
     }
 
-    for (auto& p : _to_split) {
-      JoinStrips(_node_ids[p.first].first, _node_ids[p.first].first,
-                 _node_ids[p.second].first);
-      UpdateNodeIds(_node_ids[p.first].first);
+    for (auto& p : to_split_) {
+      JoinStrips(node_ids_[p.first].first, node_ids_[p.first].first,
+                 node_ids_[p.second].first);
+      UpdateNodeIds(node_ids_[p.first].first);
     }
     return local_terminals_count;
   }
 
   bool KStarContains(IndexType k) const {
-    return _k_star[k] >= _k_star_version;
+    return k_star_[k] >= k_star_version_;
   }
 
-  void KStarInsert(IndexType k) { _k_star[k] = _k_star_version; }
+  void KStarInsert(IndexType k) { k_star_[k] = k_star_version_; }
 
   void KStarClear() {
-    _k_star_version += 1 + _k_star_subgroup_version;
-    _k_star_subgroup_version = 1;
+    k_star_version_ += 1 + k_star_subgroup_version_;
+    k_star_subgroup_version_ = 1;
+  }
+
+  bool OptimalKStarFind(IndexType terminal, int k) {
+    KStarClear();
+    star_nodes_tmp_.clear();
+    star_nodes_tmp_.emplace_back(terminal, kNullIndex);
+    KStarInsert(terminal);
+
+    int current_id[] = {1, 0};
+    IndexType second_end = kNullIndex;
+    bool found = false;
+    int length = 0;
+
+    while (current_id[0] != current_id[1]) {
+      current_id[length % 2] = static_cast<int>(star_nodes_tmp_.size());
+
+      for (int j = current_id[(length + 1) % 2]; j < current_id[length % 2];
+           ++j) {
+        IndexType current_node = star_nodes_tmp_[j].first;
+
+        for (IndexType neighbour : graph_.GetNeighbors(current_node)) {
+          if (!KStarContains(neighbour)) {
+            KStarInsert(neighbour);
+            star_nodes_tmp_.emplace_back(neighbour, static_cast<IndexType>(j));
+
+            if (neighbour == terminal) continue;
+            if (!IsTerminal(neighbour)) continue;
+
+            if (checked_terminals_.contains(terminal) &&
+                checked_terminals_[terminal].contains(neighbour)) {
+              continue;
+            }
+
+            second_end = neighbour;
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+      if (found) break;
+      length++;
+    }
+
+    if (!found) return false;
+
+    checked_terminals_[terminal].insert(second_end);
+    KStarClear();
+    star_nodes_.clear();
+
+    IndexType current_idx = static_cast<IndexType>(star_nodes_tmp_.size() - 1);
+    while (current_idx != kNullIndex) {
+      IndexType node = star_nodes_tmp_[current_idx].first;
+      star_nodes_.push_back(node);
+      KStarInsert(node);
+      current_idx = star_nodes_tmp_[current_idx].second;
+    }
+
+    current_id[0] = static_cast<int>(star_nodes_.size());
+    current_id[1] = 0;
+
+    for (int i = 0; i < expansion_width_; ++i) {
+      current_id[i % 2] = static_cast<int>(star_nodes_.size());
+
+      for (int j = current_id[(i + 1) % 2]; j < current_id[i % 2]; ++j) {
+        for (IndexType neighbour : graph_.GetNeighbors(star_nodes_[j])) {
+          if (!KStarContains(neighbour)) {
+            KStarInsert(neighbour);
+            star_nodes_.push_back(neighbour);
+          }
+        }
+      }
+    }
+
+    KStarSubgroupClear();
+    current_id[0] = 1;
+    current_id[1] = 0;
+    star_nodes_.clear();
+    star_nodes_.push_back(second_end);
+    nodes_order_[second_end] = 0;
+    KStarSubgroupInsert(second_end);
+
+    int it = 0;
+    while (current_id[1] != current_id[0]) {
+      current_id[it % 2] = static_cast<int>(star_nodes_.size());
+
+      for (int j = current_id[(it + 1) % 2]; j < current_id[it % 2]; ++j) {
+        IndexType current_node = star_nodes_[j];
+        for (IndexType neighbour : graph_.GetNeighbors(current_node)) {
+          if (!KStarSubgroupContains(neighbour) && KStarContains(neighbour)) {
+            KStarSubgroupInsert(neighbour);
+            star_nodes_.push_back(neighbour);
+            nodes_order_[neighbour] = nodes_order_[current_node] + 1;
+          }
+        }
+      }
+      it++;
+    }
+    KStarSubgroupClear();
+
+    return true;
   }
 
   void KStarFind(IndexType terminal, int k) {
     KStarClear();
-    _star_nodes.clear();
-    _star_nodes.push_back(terminal);
+    star_nodes_.clear();
+    star_nodes_.push_back(terminal);
     KStarInsert(terminal);
 
     int current_id[] = {0, 0};
     for (int i = 0; i < k; i++) {
-      current_id[i % 2] = _star_nodes.size();
+      current_id[i % 2] = static_cast<int>(star_nodes_.size());
 
       for (int j = current_id[(i + 1) % 2]; j < current_id[i % 2]; j++) {
-        for (auto neighbour : graph.get_neighbors(_star_nodes[j])) {
+        for (auto neighbour : graph_.GetNeighbors(star_nodes_[j])) {
           if (!KStarContains(neighbour)) {
             KStarInsert(neighbour);
-            _star_nodes.push_back(neighbour);
+            star_nodes_.push_back(neighbour);
           }
         }
       }
@@ -431,32 +545,36 @@ class PathCover {
   }
 
   bool KStarSubgroupContains(IndexType k) const {
-    return _k_star[k] == _k_star_version + _k_star_subgroup_version;
+    return k_star_[k] == k_star_version_ + k_star_subgroup_version_;
   }
 
   void KStarSubgroupInsert(IndexType k) {
-    _k_star[k] = _k_star_version + _k_star_subgroup_version;
+    k_star_[k] = k_star_version_ + k_star_subgroup_version_;
   }
 
-  void KStarSubgroupClear() { _k_star_subgroup_version++; }
+  void KStarSubgroupClear() { k_star_subgroup_version_++; }
 
-  void KStarSubgroupErase(IndexType k) { _k_star[k]--; }
+  void KStarSubgroupErase(IndexType k) { k_star_[k]--; }
 
   bool LaunchTunneling(IndexType terminal, int k) {
-    if(!Validate()) abort();
-    struct search_data {
+    struct SearchData {
       int depth;
       int visited_terminals_count;
-      fix_data data;
+      FixData data;
     };
 
-    KStarFind(terminal, k);
+    if (optimal_mode_) {
+      if (!OptimalKStarFind(terminal, k)) return false;
+    } else {
+      KStarFind(terminal, k);
+    }
+
     int local_terminals_count = LocalizeStrips(k);
     std::vector<IndexType> visited_order;
-    visited_order.reserve(_star_nodes.size());
-    
-    std::vector<search_data> search_stack;
-    search_stack.reserve(_max_depth + 2); 
+    visited_order.reserve(star_nodes_.size());
+
+    std::vector<SearchData> search_stack;
+    search_stack.reserve(max_depth_ + 2);
 
     search_stack.push_back({0, 1, {terminal, terminal, terminal}});
     visited_order.push_back(terminal);
@@ -466,22 +584,23 @@ class PathCover {
 
     bool connection_found = false;
     int counter = 0;
-    IndexType second_end = NullIndex;
+    IndexType second_end = kNullIndex;
 
     while (!search_stack.empty()) {
       auto current_state = search_stack.back();
       search_stack.pop_back();
       counter++;
-      if (counter == _max_count) break;
-      if (current_state.depth == _max_depth) continue;
+      if (counter == max_count_) break;
+      if (current_state.depth == max_depth_) continue;
 
-      while (_insert_order.size() > current_state.depth - 1) {
+      while (insert_order_.size() >
+             static_cast<size_t>(current_state.depth - 1)) {
         FixMess();
       }
 
       if (current_state.depth > 0) {
         while (visited_order.size() >
-               (2 * (current_state.depth - 1) + 1)) {
+               static_cast<size_t>(2 * (current_state.depth - 1) + 1)) {
           KStarSubgroupErase(visited_order.back());
           visited_order.pop_back();
         }
@@ -496,30 +615,21 @@ class PathCover {
       }
 
       IndexType new_terminal_node = current_state.data.split;
-      auto [terminal_strip, terminal_id] = _node_ids[new_terminal_node];
+      auto [terminal_strip, terminal_id] = node_ids_[new_terminal_node];
       bool front = (terminal_strip == new_terminal_node);
 
-      std::array<IndexType, 2> red_edges = {NullIndex, NullIndex};
-      size_t red_count = 0;
-      
-      for (IndexType neighbor : graph.get_neighbors(new_terminal_node)) {
-          if (IsRedEdge(new_terminal_node, neighbor)) {
-              if (red_count < 2) red_edges[red_count++] = neighbor;
-          }
+      if (optimal_mode_) {
+        std::ranges::sort(local_graph_[new_terminal_node], std::greater<>{},
+                          [&](IndexType n) { return nodes_order_[n]; });
       }
-
-      if (red_count == 2 && std::rand() % 2 != 0) {
-        std::swap(red_edges[0], red_edges[1]);
-      }
-
-      for (size_t i = 0; i < red_count; ++i) {
-        IndexType new_insert_node = red_edges[i];
-
+      for (IndexType new_insert_node : local_graph_[new_terminal_node]) {
         if (!KStarContains(new_insert_node) ||
             KStarSubgroupContains(new_insert_node))
           continue;
 
-        auto [split_strip, split_id] = _node_ids[new_insert_node];
+        if (AdjacencyTest(new_terminal_node, new_insert_node)) continue;
+
+        auto [split_strip, split_id] = node_ids_[new_insert_node];
         bool front2 = (split_strip == new_insert_node);
         bool same_strip = (terminal_strip == split_strip);
 
@@ -530,29 +640,26 @@ class PathCover {
           break;
         }
 
-        std::array<IndexType, 2> possible_splits = {NullIndex, NullIndex};
-        size_t split_count = 0;
-
-        for (IndexType neighbor : graph.get_neighbors(new_insert_node)) {
-          if (neighbor == _nodes[new_insert_node].prev || 
-              neighbor == _nodes[new_insert_node].next) {
-            possible_splits[split_count++] = neighbor;
-          }
+        if (optimal_mode_) {
+          std::ranges::sort(local_graph_[new_insert_node], std::greater<>{},
+                            [&](IndexType n) { return nodes_order_[n]; });
         }
 
-        if (split_count == 2 && std::rand() % 2 != 0) {
-          std::swap(possible_splits[0], possible_splits[1]);
-        }
-
-        for (size_t i = 0; i < split_count; ++i) {
-          IndexType new_split_node = possible_splits[i];
-
+        for (IndexType new_split_node : local_graph_[new_insert_node]) {
           if (!KStarContains(new_split_node) ||
               KStarSubgroupContains(new_split_node))
             continue;
 
+          if (!AdjacencyTest(new_split_node, new_insert_node)) {
+            continue;
+          }
+
+          if (fake_edge_target_[new_insert_node] == new_split_node) {
+            continue;
+          }
+
           if (same_strip &&
-              front == (split_id < _node_ids[new_split_node].second))
+              front == (split_id < node_ids_[new_split_node].second))
             continue;
 
           int visited_terminals = current_state.visited_terminals_count +
@@ -571,105 +678,50 @@ class PathCover {
     }
 
     if (!connection_found) {
-      while (!_insert_order.empty()) FixMess();
+      while (!insert_order_.empty()) {
+        FixMess();
+      }
     }
 
-    _insert_order.clear();
+    insert_order_.clear();
     ApplyChanges();
 
     if (connection_found) {
-      if (_nodes[terminal].prev != NullIndex && _nodes[terminal].next != NullIndex) _terminals[terminal] = false;
-      if (_nodes[second_end].prev != NullIndex && _nodes[second_end].next != NullIndex) _terminals[second_end] = false;
+      if (nodes_[terminal].prev != kNullIndex &&
+          nodes_[terminal].next != kNullIndex)
+        terminals_[terminal] = false;
+      if (nodes_[second_end].prev != kNullIndex &&
+          nodes_[second_end].next != kNullIndex)
+        terminals_[second_end] = false;
     }
 
     return connection_found;
   }
-  bool Validate() const {
-    std::vector<bool> visited(_node_count, false);
-    IndexType visited_count = 0;
 
-    for (IndexType i = 0; i < _node_count; ++i) {
-      IndexType next_node = _nodes[i].next;
-      IndexType prev_node = _nodes[i].prev;
+  const Graph& graph_;
+  IndexType node_count_;
+  std::vector<IndexType> k_star_;
+  std::vector<IndexType> star_nodes_;
+  int k_star_version_ = 1;
+  int k_star_subgroup_version_ = 1;
 
-      if (next_node != NullIndex) {
-        if (_nodes[next_node].prev != i) {
-          std::cerr << "Bidirectional mismatch: node " << i << " points to next "
-                    << next_node << ", but its prev is " << _nodes[next_node].prev << '\n';
-          return false;
-        }
+  int max_count_ = 10000;
+  int max_depth_ = 250;
+  int expansion_width_ = 20;
+  bool optimal_mode_ = false;
 
-        bool is_adjacent = false;
-        for (IndexType neighbor : graph.get_neighbors(i)) {
-          if (neighbor == next_node) {
-            is_adjacent = true;
-            break;
-          }
-        }
-        if (!is_adjacent) {
-          std::cerr << "Adjacency mismatch: node " << i << " and " << next_node
-                    << " are connected in a strip but do not share a face in the graph.\n";
-          return false;
-        }
-      }
+  std::vector<Node> nodes_;
+  std::vector<Path> paths_;
+  std::vector<std::pair<IndexType, IndexType>> node_ids_;
+  std::vector<FixData> insert_order_;
+  std::vector<std::pair<IndexType, IndexType>> to_connect_;
+  std::vector<std::pair<IndexType, IndexType>> to_split_;
+  std::vector<bool> terminals_;
 
-      if (prev_node != NullIndex) {
-        if (_nodes[prev_node].next != i) {
-          std::cerr << "Bidirectional mismatch: node " << i << " points to prev "
-                    << prev_node << ", but its next is " << _nodes[prev_node].next << '\n';
-          return false;
-        }
-      }
-    }
-
-    for (IndexType i = 0; i < _node_count; ++i) {
-      if (_paths[i].head != NullIndex) {
-        IndexType current = _paths[i].head;
-        IndexType expected_tail = _paths[i].tail;
-        IndexType position = 0;
-
-        if (_nodes[current].prev != NullIndex) {
-          std::cerr << "Path structure error: head of path " << i 
-                    << " (node " << current << ") has a non-null prev pointer.\n";
-          return false;
-        }
-
-        IndexType last_valid = NullIndex;
-        while (current != NullIndex) {
-          if (visited[current]) {
-            std::cerr << "Cycle or overlap detected at node " << current << ".\n";
-            return false;
-          }
-          visited[current] = true;
-          visited_count++;
-
-          if (_node_ids[current].first != i || _node_ids[current].second != position) {
-            std::cerr << "Node ID mismatch at node " << current 
-                      << ". Expected {" << i << ", " << position 
-                      << "}, got {" << _node_ids[current].first << ", " 
-                      << _node_ids[current].second << "}.\n";
-            return false;
-          }
-
-          last_valid = current;
-          current = _nodes[current].next;
-          position++;
-        }
-
-        if (last_valid != expected_tail) {
-          std::cerr << "Tail mismatch in path " << i << ". Expected tail " 
-                    << expected_tail << ", but path ended at " << last_valid << ".\n";
-          return false;
-        }
-      }
-    }
-
-    if (visited_count != _node_count) {
-      std::cerr << "Coverage error: Only " << visited_count << " out of " 
-                << _node_count << " nodes belong to a valid path.\n";
-      return false;
-    }
-
-    return true;
-  }
+  std::vector<int> nodes_order_;
+  std::vector<std::pair<IndexType, IndexType>> star_nodes_tmp_;
+  std::unordered_map<IndexType, std::unordered_set<IndexType>>
+      checked_terminals_;
+  std::vector<IndexType> fake_edge_target_;
+  std::vector<std::vector<IndexType>> local_graph_;
 };

@@ -1,178 +1,103 @@
 #pragma once
+
 #include <GL/glew.h>
-#include <vector>
 #include <glm/glm.hpp>
-#include <utility>
+
 #include <cstddef>
+#include <utility>
+#include <vector>
 
-class Mesh;
-struct Vertex
-{
-    glm::vec3 pos;
-    int state;
+struct Vertex {
+  glm::vec3 pos;
+  int state;
 };
 
-struct PrimitiveOnlyMesh
-{
-    inline static int graph_color_location = 0;
-    inline static int projection_location = 0;
-    inline static int view_location = 0;
-    inline static int draw_call_id = 0;
-    inline static int meshes_count = 0;
+class Mesh {
+ public:
+  Mesh() = default;
+  explicit Mesh(GLenum mode) : mode_(mode) {}
 
-    PrimitiveOnlyMesh()
-    {
-        mesh_id = meshes_count;
-        meshes_count++;        
+  ~Mesh() { Cleanup(); }
+
+  Mesh(const Mesh&) = delete;
+  Mesh& operator=(const Mesh&) = delete;
+
+  Mesh(Mesh&& other) noexcept
+      : vao_(std::exchange(other.vao_, 0)),
+        vbo_(std::exchange(other.vbo_, 0)),
+        vertex_count_(std::exchange(other.vertex_count_, 0)),
+        mode_(other.mode_) {}
+
+  Mesh& operator=(Mesh&& other) noexcept {
+    if (this != &other) {
+      Cleanup();
+      vao_ = std::exchange(other.vao_, 0);
+      vbo_ = std::exchange(other.vbo_, 0);
+      vertex_count_ = std::exchange(other.vertex_count_, 0);
+      mode_ = other.mode_;
     }
-    PrimitiveOnlyMesh(GLenum m) : mode(m) {
-        stride = mode == GL_TRIANGLES ? 3 : mode == GL_LINES ? 2 : 1;
-        mesh_id = meshes_count;
-        meshes_count++;        
-    }
-    ~PrimitiveOnlyMesh()
-    {
-        glDeleteVertexArrays(1, &VAO2);
-        glDeleteBuffers(1, &VBO2);
-    }
-    
-    inline void set_mode(GLenum m) {
-        mode = m;
-        stride = mode == GL_TRIANGLES ? 3 : mode == GL_LINES ? 2 : 1;
-    }
-    
-    inline void create_primitive_mesh(float *positions, unsigned int *indices, int index_count, int *states = nullptr) {
-        primitive_data.resize(index_count);
-        for (int i = 0; i < index_count; i++)
-        {
-            primitive_data[i].pos.x = positions[3 * indices[i]];
-            primitive_data[i].pos.y = positions[3 * indices[i] + 1];
-            primitive_data[i].pos.z = positions[3 * indices[i] + 2];
-            // Strict 1:1 mapping - expects one state per index passed
-            primitive_data[i].state = states == nullptr ? 150 : states[i];
-        }
-        glGenVertexArrays(1, &VAO2);
-        glGenBuffers(1, &VBO2);
-        glBindVertexArray(VAO2);
+    return *this;
+  }
 
-        glBindBuffer(GL_ARRAY_BUFFER, VBO2);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * primitive_data.size(), primitive_data.data(), GL_STATIC_DRAW);
+  void SetMode(GLenum mode) { mode_ = mode; }
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
-        glEnableVertexAttribArray(0);
+  void CreatePrimitiveMesh(const float* positions, const unsigned int* indices,
+                           int index_count, const int* states = nullptr) {
+    if (index_count <= 0) return;
 
-        // Safe offset reading to avoid padding issues
-        glVertexAttribIPointer(1, 1, GL_INT, sizeof(Vertex), (void*)offsetof(Vertex, state));
-        glEnableVertexAttribArray(1);
-
-        glBindVertexArray(0);
+    std::vector<Vertex> vertices(index_count);
+    for (int i = 0; i < index_count; ++i) {
+      unsigned int idx = indices[i];
+      vertices[i].pos = glm::vec3(positions[3 * idx + 0], positions[3 * idx + 1],
+                                  positions[3 * idx + 2]);
+      vertices[i].state = states ? states[i] : 150;
     }
 
-    inline void create_primitive_mesh(const std::vector<glm::vec3> &positions) {
-        generate_primitive_data(positions);
-        glGenVertexArrays(1, &VAO2);
-        glGenBuffers(1, &VBO2);
-        glBindVertexArray(VAO2);
+    if (!vao_) glGenVertexArrays(1, &vao_);
+    if (!vbo_) glGenBuffers(1, &vbo_);
 
-        glBindBuffer(GL_ARRAY_BUFFER, VBO2);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * primitive_data.size(), primitive_data.data(), GL_STATIC_DRAW);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * vertices.size(),
+                 vertices.data(), GL_STATIC_DRAW);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
-        glEnableVertexAttribArray(0);
+    glVertexAttribPointer(
+        0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+        reinterpret_cast<const void*>(offsetof(Vertex, pos)));
+    glEnableVertexAttribArray(0);
 
-        glVertexAttribIPointer(1, 1, GL_INT, sizeof(Vertex), (void*)offsetof(Vertex, state));
-        glEnableVertexAttribArray(1);
+    glVertexAttribIPointer(
+        1, 1, GL_INT, sizeof(Vertex),
+        reinterpret_cast<const void*>(offsetof(Vertex, state)));
+    glEnableVertexAttribArray(1);
 
-        glBindVertexArray(0);
+    glBindVertexArray(0);
+    vertex_count_ = static_cast<GLsizei>(index_count);
+  }
+
+  void Draw() const {
+    if (vao_ && vertex_count_ > 0) {
+      glBindVertexArray(vao_);
+      glDrawArrays(mode_, 0, vertex_count_);
+      glBindVertexArray(0);
     }
+  }
 
-    inline void update_primitive_indices(const std::vector<glm::vec3> &positions) {
-        generate_primitive_data(positions);
-        upload_buffer();
+ private:
+  void Cleanup() {
+    if (vao_) {
+      glDeleteVertexArrays(1, &vao_);
+      vao_ = 0;
     }
-
-    inline void update_primitive_states() {
-        for (int i = 0; i < states.size(); i++)
-        {
-            primitive_data[i].state = states[i];
-        }
-        upload_buffer();
+    if (vbo_) {
+      glDeleteBuffers(1, &vbo_);
+      vbo_ = 0;
     }
+    vertex_count_ = 0;
+  }
 
-    inline void draw() {
-        glUniform1i(PrimitiveOnlyMesh::graph_color_location, PrimitiveOnlyMesh::draw_call_id++);
-        glBindVertexArray(VAO2);
-        glDrawArrays(mode, 0, primitive_data.size());
-        glBindVertexArray(0);
-    }
-
-    std::vector<int> states;
-    std::vector<int> indices;
-    int stride;
-    GLenum mode;
-    
-protected:
-    inline void upload_buffer() {
-        glBindVertexArray(VAO2);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO2);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * primitive_data.size(), primitive_data.data(), GL_STATIC_DRAW);
-    }
-
-    inline void generate_primitive_data(const std::vector<glm::vec3> &positions) {
-        primitive_data.resize(indices.size());
-        for (int i = 0; i < indices.size(); i++)
-        {
-            primitive_data[i].pos = positions[indices[i]];
-            primitive_data[i].state = states.size() ? states[i] : 0;
-        }
-    }
-
-    GLuint VBO2, VAO2;
-    int mesh_id;
-    std::vector<Vertex> primitive_data;
-};
-
-struct Mesh : public PrimitiveOnlyMesh 
-{
-    inline static int point_color_location = 0;
-    inline static int projection_location = 0;
-    inline static int view_location = 0;
-
-    Mesh(GLenum m) : PrimitiveOnlyMesh(m) { }
-    ~Mesh()
-    {
-        glDeleteVertexArrays(1, &VAO);
-        glDeleteBuffers(1, &VBO);
-    }
-    
-    inline void create_mesh() {
-        glGenVertexArrays(1, &VAO);
-        glGenBuffers(1, &VBO);
-        glBindVertexArray(VAO);
-
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * positions.size(), positions.data(), GL_STATIC_DRAW);
-
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void *)0);
-        glEnableVertexAttribArray(0);
-
-        glBindVertexArray(0);
-
-        create_primitive_mesh(positions);
-    }
-
-    inline void update_indices() {
-        update_primitive_indices(positions);
-    }
-
-    inline void draw_points() {
-        glUniform1i(Mesh::point_color_location, PrimitiveOnlyMesh::draw_call_id++);
-        glBindVertexArray(VAO);
-        glDrawArrays(GL_POINTS, 0, positions.size());
-        glBindVertexArray(0);
-    }
-
-    std::vector<glm::vec3> positions;
-private:
-    GLuint VBO, VAO;
+  GLuint vao_ = 0;
+  GLuint vbo_ = 0;
+  GLsizei vertex_count_ = 0;
+  GLenum mode_ = GL_TRIANGLES;
 };
