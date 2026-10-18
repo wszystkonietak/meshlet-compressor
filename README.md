@@ -1,8 +1,8 @@
 # ETA — Triangle Strip Generator
 
-An implementation of the Enhanced Tunnelling Algorithm (ETA) for decomposing triangle meshes into continuous triangle strips.
+An implementation of the [*Enhanced Tunnelling Algorithm (ETA)*](https://www.researchgate.net/publication/221622706_Partitioning_Meshes_into_Strips_using_the_Enhanced_Tunnelling_Algorithm_ETA) for decomposing triangle meshes into continuous triangle strips.
 
-The algorithm treats the mesh as a dual graph and uses bounded Depth-First Search (DFS) tunneling to find a minimal path cover. It was highlighted by AMD researchers (*Towards Practical Meshlet Compression*, VMV 2024) as a practical alternative to mixed-integer linear programming (MILP) when ordering primitives for meshlet compression.
+The algorithm treats the mesh as a dual graph and uses bounded Depth-First Search (DFS) tunneling to find a minimal path cover. It was highlighted by AMD researchers ([*Towards Practical Meshlet Compression*](https://arxiv.org/abs/2404.06359), VMV 2024) as a practical alternative to mixed-integer linear programming (MILP) when ordering primitives for meshlet compression.
 
 ---
 
@@ -64,5 +64,5 @@ Measured on an Apple M3 MacBook Air across full meshes:
 
 ## References
 
-1. **[Partitioning Meshes into Strips using the Enhanced Tunnelling Algorithm (ETA)](https://researchgate.net)** by M. B. Porcu and R. Scateni.
-2. **[Towards Practical Meshlet Compression](https://arxiv.org)** by B. Kuth et al.
+1. **[Partitioning Meshes into Strips using the Enhanced Tunnelling Algorithm (ETA)](https://www.researchgate.net/publication/221622706_Partitioning_Meshes_into_Strips_using_the_Enhanced_Tunnelling_Algorithm_ETA)** by M. B. Porcu and R. Scateni.
+2. **[Towards Practical Meshlet Compression](https://arxiv.org/abs/2404.06359)** by B. Kuth et al.
